@@ -1,6 +1,6 @@
-data_root = 'data/semantickitti'
-ann_file = 'data/semantickitti/labels'
-stereo_depth_root = 'data/semantickitti/depth'
+data_root = '/ws/dataset/semantickitti'
+ann_file = '/ws/dataset/semantickitti/labels'
+stereo_depth_root = '/ws/dataset/semantickitti/depth'
 camera_used = ['left']
 
 dataset_type = 'SemanticKITTIDataset'
@@ -142,7 +142,7 @@ model = dict(
         out_indices=(2, 3, 4, 5, 6),
         with_cp=True,
         init_cfg=dict(type='Pretrained', prefix='backbone', 
-        checkpoint='./ckpts/efficientnet-b7_3rdparty_8xb32-aa_in1k_20220119-bf03951c.pth'),
+        checkpoint='./ckpt/efficientnet-b7_3rdparty_8xb32-aa_in1k_20220119-bf03951c.pth'),
     ),
     img_neck=dict(
         type='SECONDFPN',
@@ -293,7 +293,7 @@ model = dict(
                 convert_weights=True,
                 init_cfg=dict(
                     type='Pretrained',
-                    checkpoint='./ckpts/swin_tiny_patch4_window7_224.pth'),
+                    checkpoint='./ckpt/swin_tiny_patch4_window7_224.pth'),
                     ),
             global_encoder_neck=dict(
                 type='GeneralizedLSSFPN',
@@ -380,4 +380,4 @@ lr_scheduler = dict(
     frequency=1
 )
 
-load_from='./ckpts/efficientnet-seg-depth.pth'
+load_from='./ckpt/efficientnet-seg-depth.pth'

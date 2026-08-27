@@ -17,8 +17,13 @@ class pl_model(LightningBaseModel):
 
         model_config = config['model']
         self.model = build_model(model_config)
-        if 'load_from' in config:
-            load_checkpoint(self.model, config['load_from'], map_location='cpu')
+        if config.get('load_from'):
+            # Lightning checkpoints store tensors under a 'model.' prefix; strip it (plus the
+            # default 'module.') so pretrain weights actually map onto self.model. Without this
+            # the load silently no-ops and training starts from scratch. Already-organized
+            # .pth files (organize_ckpt.py) have no prefix, so this is a no-op for them.
+            load_checkpoint(self.model, config['load_from'], map_location='cpu',
+                            revise_keys=[(r'^model\.', ''), (r'^module\.', '')])
         
         self.num_class = config['num_class']
         self.class_names = config['class_names']

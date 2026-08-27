@@ -16,6 +16,9 @@ def parse_config():
     parser = ArgumentParser()
     parser.add_argument('--config_path', default='./configs/semantic_kitti.py')
     parser.add_argument('--ckpt_path', default=None)
+    parser.add_argument('--load', default=None,
+                        help='checkpoint to initialize weights from (sets load_from); '
+                             'use --ckpt_path instead to resume trainer state')
     parser.add_argument('--seed', type=int, default=7240, help='random seed point')
     parser.add_argument('--log_folder', default='semantic_kitti')
     parser.add_argument('--save_path', default=None)
@@ -25,11 +28,14 @@ def parse_config():
     parser.add_argument('--log_every_n_steps', type=int, default=1000)
     parser.add_argument('--check_val_every_n_epoch', type=int, default=1)
     parser.add_argument('--pretrain', action='store_true')
+    parser.add_argument('--accumulate_grad_batches', type=int, default=1)
 
     args = parser.parse_args()
     cfg = Config.fromfile(args.config_path)
 
     cfg.update(vars(args))
+    if args.load:
+        cfg.load_from = args.load
     return args, cfg
 
 if __name__ == '__main__':
@@ -67,7 +73,8 @@ if __name__ == '__main__':
                 find_unused_parameters=False
             ),
             max_steps=config.training_steps,
-            resume_from_checkpoint=None,
+            accumulate_grad_batches=config['accumulate_grad_batches'],
+            resume_from_checkpoint=config['ckpt_path'],
             callbacks=[
                 checkpoint_callback,
                 LearningRateMonitor(logging_interval='step')

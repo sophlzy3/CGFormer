@@ -1,7 +1,7 @@
-data_root = 'data/semantickitti'
-ann_file = 'data/semantickitti/labels'
-stereo_depth_root = 'data/semantickitti/depth'
-seg_label_root = 'data/semantickitti/lidarseg'
+data_root = '/ws/dataset/semantickitti'
+ann_file = '/ws/dataset/semantickitti/labels'
+stereo_depth_root = '/ws/dataset/semantickitti/depth'
+seg_label_root = '/ws/dataset/semantickitti/lidarseg'
 
 camera_used = ['left']
 
@@ -140,7 +140,7 @@ model = dict(
         out_indices=(2, 3, 4, 5, 6),
         with_cp=True,
         init_cfg=dict(type='Pretrained', prefix='backbone', 
-        checkpoint='./pretrain/efficientnet-b7_3rdparty_8xb32-aa_in1k_20220119-bf03951c.pth'),
+        checkpoint='./ckpt/efficientnet-b7_3rdparty_8xb32-aa_in1k_20220119-bf03951c.pth'),
     ),
     img_neck=dict(
         type='SECONDFPN',

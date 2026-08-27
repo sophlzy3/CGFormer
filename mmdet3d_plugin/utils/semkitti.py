@@ -116,19 +116,19 @@ def sem_scal_loss(pred, ssc_target, ignore_index=255):
             nominator = torch.sum(p * completion_target)
             loss_class = 0
             if torch.sum(p) > 0:
-                precision = nominator / (torch.sum(p))
+                precision = (nominator / (torch.sum(p))).clamp(0, 1)
                 loss_precision = F.binary_cross_entropy(
                     precision, torch.ones_like(precision)
                 )
                 loss_class += loss_precision
             if torch.sum(completion_target) > 0:
-                recall = nominator / (torch.sum(completion_target))
+                recall = (nominator / (torch.sum(completion_target))).clamp(0, 1)
                 loss_recall = F.binary_cross_entropy(recall, torch.ones_like(recall))
                 loss_class += loss_recall
             if torch.sum(1 - completion_target) > 0:
-                specificity = torch.sum((1 - p) * (1 - completion_target)) / (
+                specificity = (torch.sum((1 - p) * (1 - completion_target)) / (
                     torch.sum(1 - completion_target)
-                )
+                )).clamp(0, 1)
                 loss_specificity = F.binary_cross_entropy(
                     specificity, torch.ones_like(specificity)
                 )

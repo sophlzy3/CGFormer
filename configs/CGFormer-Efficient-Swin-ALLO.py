@@ -1,27 +1,34 @@
-data_root = '/ws/dataset/semantickitti'
-ann_file = '/ws/dataset/semantickitti/labels'
-stereo_depth_root = '/ws/dataset/semantickitti/depth'
-camera_used = ['left']
+# CGFormer stage 2 (semantic scene completion) on ALLO.
+# Cold-start it from the stage-1 checkpoint produced by CGFormer-Efficient-Swin-ALLO-Pretrain.py:
+#   python main.py --config_path configs/CGFormer-Efficient-Swin-ALLO.py --load <stage1 last.ckpt>
+# (--load sets load_from; use --ckpt_path only to resume this stage's own trainer state.)
+data_root = __import__('os').environ.get('ALLO_3D_ROOT', '/ws/dataset/allo_3d')
+depth_root = __import__('os').environ.get('ALLO_MONODEPTH_ROOT', '/ws/dataset/allo_3d/mono_depth')
 
-dataset_type = 'SemanticKITTIDataset'
-point_cloud_range = [0, -25.6, -2, 51.2, 25.6, 4.4]
-occ_size = [256, 256, 32]
+dataset_type = 'ALLODataset'
+point_cloud_range = [0, -12.8, -12.8, 25.6, 12.8, 12.8]
+occ_size = [128, 128, 128]
 
-semantic_kitti_class_frequencies = [
-        5.41773033e09, 1.57835390e07, 1.25136000e05, 1.18809000e05, 6.46799000e05,
-        8.21951000e05, 2.62978000e05, 2.83696000e05, 2.04750000e05, 6.16887030e07,
-        4.50296100e06, 4.48836500e07, 2.26992300e06, 5.68402180e07, 1.57196520e07,
-        1.58442623e08, 2.06162300e06, 3.69705220e07, 1.15198800e06, 3.34146000e05,
-    ]
+# Voxel counts per final class on OUR ALLO train split at 128^3 (same list VoxDet uses).
+allo_class_frequencies = [
+    57254772110,
+    25880433,
+    142881366,
+    1858037410,
+    222495459,
+    1313280749,
+    281078841,
+]
 
-# 20 classes with unlabeled
+# Raw ALLO labels hold 9 classes; AnomalyMapLabels drops the anomaly and IgnoreLabels
+# drops celestial_bodies, leaving these 7 trainable classes.
 class_names = [
-    'unlabeled', 'car', 'bicycle', 'motorcycle', 'truck', 'other-vehicle',
-    'person', 'bicyclist', 'motorcyclist', 'road', 'parking', 'sidewalk',
-    'other-ground', 'building', 'fence', 'vegetation', 'trunk', 'terrain',
-    'pole', 'traffic-sign',
+    "background", "robotic_arms", "solar_arrays", "pressurized_modules",
+    "airlock_docking_ports", "truss_other", "modules_other"
 ]
 num_class = len(class_names)
+
+indices_to_ignore = [7, 8]  #* post-remap 7: "celestial_bodies", 8: "anomaly"
 
 # dataset config #
 bda_aug_conf = dict(
@@ -33,61 +40,68 @@ bda_aug_conf = dict(
 )
 
 data_config={
-    'input_size': (384, 1280),
-    # 'resize': (-0.06, 0.11),
-    # 'rot': (-5.4, 5.4),
-    # 'flip': True,
+    'input_size': (672, 1344),  #* to be divisible by 32
     'resize': (0., 0.),
     'rot': (0.0, 0.0 ),
-    'flip': (0.0, 0.0 ),
-    'flip': False,
+    'flip': True,
+    'flip_v': False,   # vertical flip is geometrically invalid here (cost ~10 mIoU on VoxDet)
     'crop_h': (0.0, 0.0),
     'resize_test': 0.00,
 }
 
+pixel_mean = [0.18615150076452516, 0.18466143346552077, 0.1804993998048694]
+pixel_std = [0.24937694186317588, 0.24854584057424572, 0.24403493825212044]
+
+# anomaly_raw_index=7: OUR ALLO writes the injected anomaly at raw index 7 (voxel AND seg),
+# not the canonical raw-1. Do not remove -- see CLAUDE.md.
 train_pipeline = [
-    dict(type='LoadMultiViewImageFromFiles', data_config=data_config, load_stereo_depth=True,
-         is_train=True, color_jitter=(0.4, 0.4, 0.4)),
-    dict(type='CreateDepthFromLiDAR', data_root=data_root, dataset='kitti', load_seg=False),
+    dict(type='LoadMultiViewImageFromFilesWithSegDepth', data_config=data_config, is_train=True,
+         color_jitter=(0.4, 0.4, 0.4), mean=pixel_mean, std=pixel_std),
     dict(type='LoadAnnotationOcc', bda_aug_conf=bda_aug_conf, apply_bda=False,
             is_train=True, point_cloud_range=point_cloud_range),
-    dict(type='CollectData', keys=['img_inputs', 'gt_occ'], 
-            meta_keys=['pc_range', 'occ_size', 'raw_img', 'stereo_depth', 'focal_length', 'baseline', 'img_shape', 'gt_depths']),
+    dict(type='AnomalyMapLabels', num_classes=num_class, with_seg=True, anomaly_index=1,
+         with_anomalies=False, anomaly_raw_index=7),
+    dict(type='IgnoreLabels', indices_to_ignore=indices_to_ignore, ignore_index=255),
+    dict(type='FilterDepth', min_depth=0, max_depth=100, background_index=0),
+    dict(type='DownsampleVoxels', occ_size=occ_size),
+    dict(type='CollectData', keys=['img_inputs', 'gt_occ'],
+            meta_keys=['pc_range', 'occ_size', 'raw_img', 'stereo_depth', 'img_shape', 'gt_depths']),
 ]
 
 trainset_config=dict(
     type=dataset_type,
-    stereo_depth_root=stereo_depth_root,
     data_root=data_root,
-    ann_file=ann_file,
+    depth_root=depth_root,
     pipeline=train_pipeline,
     split='train',
-    camera_used=camera_used,
     occ_size=occ_size,
     pc_range=point_cloud_range,
     test_mode=False,
 )
 
 test_pipeline = [
-    dict(type='LoadMultiViewImageFromFiles', data_config=data_config, load_stereo_depth=True,
-         is_train=False, color_jitter=None),
-    dict(type='CreateDepthFromLiDAR', data_root=data_root, dataset='kitti'),
+    dict(type='LoadMultiViewImageFromFilesWithSegDepth', data_config=data_config, is_train=False,
+         color_jitter=None, mean=pixel_mean, std=pixel_std),
     dict(type='LoadAnnotationOcc', bda_aug_conf=bda_aug_conf, apply_bda=False,
             is_train=False, point_cloud_range=point_cloud_range),
-    dict(type='CollectData', keys=['img_inputs', 'gt_occ'],  
-            meta_keys=['pc_range', 'occ_size', 'sequence', 'frame_id', 'raw_img', 'stereo_depth', 'focal_length', 'baseline', 'img_shape', 'gt_depths'])
+    dict(type='AnomalyMapLabels', num_classes=num_class, with_seg=True, anomaly_index=1,
+         with_anomalies=False, anomaly_raw_index=7),
+    dict(type='IgnoreLabels', indices_to_ignore=indices_to_ignore, ignore_index=255),
+    dict(type='FilterDepth', min_depth=0, max_depth=100, background_index=0),
+    dict(type='DownsampleVoxels', occ_size=occ_size),
+    dict(type='CollectData', keys=['img_inputs', 'gt_occ'],
+            meta_keys=['pc_range', 'occ_size', 'raw_img', 'stereo_depth', 'img_shape', 'gt_depths']),
 ]
 
 testset_config=dict(
     type=dataset_type,
-    stereo_depth_root=stereo_depth_root,
     data_root=data_root,
-    ann_file=ann_file,
+    depth_root=depth_root,
     pipeline=test_pipeline,
     split='test',
-    camera_used=camera_used,
     occ_size=occ_size,
-    pc_range=point_cloud_range
+    pc_range=point_cloud_range,
+    test_mode=True,
 )
 
 data = dict(
@@ -114,12 +128,18 @@ voxel_x = (point_cloud_range[3] - point_cloud_range[0]) / occ_size[0]
 voxel_y = (point_cloud_range[4] - point_cloud_range[1]) / occ_size[1]
 voxel_z = (point_cloud_range[5] - point_cloud_range[2]) / occ_size[2]
 
+# 'dbound' must match the stage-1 config: it fixes the depth-bin count D of the depth net.
 grid_config = {
     'xbound': [point_cloud_range[0], point_cloud_range[3], voxel_x * lss_downsample[0]],
     'ybound': [point_cloud_range[1], point_cloud_range[4], voxel_y * lss_downsample[1]],
     'zbound': [point_cloud_range[2], point_cloud_range[5], voxel_z * lss_downsample[2]],
-    'dbound': [2.0, 58.0, 0.5],
+    'dbound': [1.0, 29.0, 0.25],   # (29-1)/0.25 = 112 bins
 }
+
+# occ_size / lss_downsample -> the query volume the VoxFormer head and TPV branch operate on
+volume_h = occ_size[0] // lss_downsample[0]
+volume_w = occ_size[1] // lss_downsample[1]
+volume_z = occ_size[2] // lss_downsample[2]
 
 _num_layers_cross_ = 3
 _num_points_cross_ = 8
@@ -141,13 +161,13 @@ model = dict(
         norm_eval=False,
         out_indices=(2, 3, 4, 5, 6),
         with_cp=True,
-        init_cfg=dict(type='Pretrained', prefix='backbone', 
+        init_cfg=dict(type='Pretrained', prefix='backbone',
         checkpoint='./ckpt/efficientnet-b7_3rdparty_8xb32-aa_in1k_20220119-bf03951c.pth'),
     ),
     img_neck=dict(
         type='SECONDFPN',
         in_channels=[48, 80, 224, 640, 2560],
-        upsample_strides=[0.5, 1, 2, 4, 4], 
+        upsample_strides=[0.5, 1, 2, 4, 4],
         out_channels=[128, 128, 128, 128, 128]),
     depth_net=dict(
         type='GeometryDepth_Net',
@@ -167,16 +187,16 @@ model = dict(
     ),
     proposal_layer=dict(
         type='VoxelProposalLayer',
-        point_cloud_range=[0, -25.6, -2, 51.2, 25.6, 4.4],
-        input_dimensions=[128, 128, 16],
+        point_cloud_range=point_cloud_range,
+        input_dimensions=[volume_h, volume_w, volume_z],
         data_config=data_config,
         init_cfg=None
     ),
     VoxFormer_head=dict(
         type='VoxFormerHead',
-        volume_h=128,
-        volume_w=128,
-        volume_z=16,
+        volume_h=volume_h,
+        volume_w=volume_w,
+        volume_z=volume_z,
         data_config=data_config,
         point_cloud_range=point_cloud_range,
         embed_dims=_dim_,
@@ -262,7 +282,7 @@ model = dict(
            ),
         mlp_prior=True
     ),
-    
+
     occ_encoder_backbone=dict(
         type='Fuser',
         embed_dims=128,
@@ -270,7 +290,7 @@ model = dict(
             type='TPVGlobalAggregator',
             embed_dims=_dim_,
             split=[8,8,8],
-            grid_size=[128,128,16],
+            grid_size=[volume_h, volume_w, volume_z],
             global_encoder_backbone=dict(
                 type='Swin',
                 embed_dims=96,
@@ -355,13 +375,13 @@ model = dict(
         },
         conv_cfg=dict(type='Conv3d', bias=False),
         norm_cfg=dict(type='GN', num_groups=32, requires_grad=True),
-        class_frequencies=semantic_kitti_class_frequencies
+        class_frequencies=allo_class_frequencies
     )
 )
 
 """Training params."""
 learning_rate=3e-4
-training_steps=25000
+training_steps=100000   # VoxDet on ALLO peaked around step ~100k; shorter runs undertrain
 
 optimizer = dict(
     type="AdamW",
@@ -380,4 +400,4 @@ lr_scheduler = dict(
     frequency=1
 )
 
-load_from='./ckpt/efficientnet-seg-depth-s42.pth'
+load_from = None   # set by cg2-allo.sh via `--load <stage-1 last.ckpt>`
